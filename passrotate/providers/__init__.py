@@ -16,3 +16,4 @@ from passrotate.providers.gitlab import GitLab
 from passrotate.providers.wikipedia import Wikipedia
 from passrotate.providers.aur import ArchUserRepository
 from passrotate.providers.ao3 import Ao3
+from passrotate.providers.noop import Noop
