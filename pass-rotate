@@ -22,6 +22,7 @@ import subprocess
 import sys
 import os
 from getpass import getpass
+import json
 
 args = docopt(__doc__, version='pass-rotate 1.0')
 
@@ -73,20 +74,45 @@ if args["--list-accounts"]:
     [print(a) for a in accounts]
     sys.exit()
 
-_get_password_cmd = config["pass-rotate"]["get-password"]
+_lookup_account_cmd = config["pass-rotate"].get("get-account")
+_lookup_password_cmd = config["pass-rotate"].get("get-password")
 _set_password_cmd = config["pass-rotate"].get("set-password")
 _gen_password_cmd = config["pass-rotate"]["gen-password"]
 
 _gen_sets_password = _set_password_cmd == None
 
-def get_password(account):
+if not _lookup_account_cmd and not _lookup_password_cmd:
+    raise Exception('pass-rotate.get-account config must be set')
+
+
+def lookup_account(account_name):
+    env = os.environ
+    env.update({
+        "ACCOUNT": account_name,
+        "PATH": env["PATH"] + ":" + os.path.dirname(__file__)
+    })
+    subp = subprocess.run([_lookup_account_cmd],
+        shell=True, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    if subp.returncode != 0:
+        raise Exception(
+            "lookup_account command exited with nonzero status code:\n" +
+            subp.stdout.decode())
+
+    cfg = json.loads(subp.stdout.decode())
+    password = cfg.pop('password')
+
+    return (password, cfg)
+
+def lookup_password(account):
     env = os.environ
     env.update({ "ACCOUNT": account })
-    subp = subprocess.run([_get_password_cmd],
+    subp = subprocess.run([_lookup_password_cmd],
             shell=True, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if subp.returncode != 0:
-        raise Exception("get_password command exited with nonzero status code")
+        raise Exception("lookup_password command exited with nonzero status code")
     return subp.stdout.decode().strip()
 
 def set_password(account, new_password):
@@ -108,10 +134,35 @@ def gen_password(account):
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if subp.returncode != 0:
         raise Exception("gen_password command exited with nonzero status code")
+
     if _gen_sets_password:
-        return get_password(account)
+        return get_account(account)['password']
     else:
         return subp.stdout.decode()
+
+def get_account(account_name):
+    cfg = config[account_name] or {}
+
+    if _lookup_account_cmd:
+        password, account_cfg = lookup_account(account_name)
+    else:
+        if not config.has_section(account_name):
+            raise Exception("Error: No account configured for {}".format(account_name))
+
+        password = lookup_password(account_name)
+        account_cfg = {}
+
+    account = {
+        "name": account_name,
+        "password": password,
+        "config": { **cfg, **account_cfg }  # TODO - Limit keys?
+    }
+
+    if 'username' not in account['config']:
+        raise Exception(
+            "username is not set in account {}".format(account["name"]))
+
+    return account
 
 def custom_prompt(prompt, prompt_type):
     return getpass(prompt="\n  " + prompt + ": ")
@@ -119,33 +170,37 @@ def custom_prompt(prompt, prompt_type):
 pass_rotate.set_prompt(custom_prompt)
 
 errs = 0
-for account in args.get("<accounts>"):
-    if not config.has_section(account):
-        print("Error: No account configured for {}".format(account))
+for account_name in args.get("<accounts>"):
+    try:
+        account = get_account(account_name)
+    except Exception as e:
+        raise e
+        print(e)  # TODO
         errs += 1
         continue
-    cfg = config[account]
-    domain = cfg.get("domain") or account
-    provider = pass_rotate.get_provider(domain, dict(cfg))
-    pass_name = cfg["pass-name"] if "pass-name" in cfg else account
+
+    domain = account.get("domain", account_name)
+    pass_name = account.get("pass-name", account_name)
+
+    provider = pass_rotate.get_provider(domain, account['config'])
     if not provider:
-        print("Error: pass-rotate does not have a service provider for {}".format(domain))
-        errs += 1
-        continue
+        raise Exception(
+            "Error: pass-rotate does not have a service provider for {}".format(domain))
+
     sys.stderr.write("Rotating {}... ".format(pass_name))
     sys.stderr.flush()
     try:
-        old_password = get_password(pass_name)
+        old_password = account['password']
         provider.prepare(old_password)
         new_password = gen_password(pass_name)
         provider.execute(old_password, new_password)
         if not _gen_sets_password:
-            set_password(account, new_password)
+            set_password(account_name, new_password)
         sys.stderr.write("OK\n")
     except:
         sys.stderr.write("FAIL\n")
         sys.stderr.write(traceback.format_exc())
-        sys.stderr.write("\nFailed to rotate {}\n".format(account))
+        sys.stderr.write("\nFailed to rotate {}\n".format(account_name))
         errs += 1
     sys.stderr.flush()
 sys.exit(errs)
