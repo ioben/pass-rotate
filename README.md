@@ -53,6 +53,22 @@ Please help us add more services - it's easy!
 pip install -e .
 ```
 
+## Tests
+
+CLI tests are done with the [BATS][1] testing framework. Unit tests are handled
+with [Pytest][2].
+
+[1]: https://github.com/sstephenson/bats
+[2]: https://docs.pytest.org/en/latest
+
+```
+# Run CLI tests
+bats tests/*_test.sh
+
+# Run unit tests
+python -m pytest
+```
+
 ## Library usage
 
 The CLI is a frontend for the passrotate Python library, which is intended to be
