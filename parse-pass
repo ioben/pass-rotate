@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+from passrotate.parsers import password_store
+import fileinput
+import json
+
+if __name__ == "__main__":
+    print(json.dumps(password_store.parse(fileinput.input())))
