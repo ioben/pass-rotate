@@ -41,3 +41,30 @@ prepare pg: pass
 execute pg: pass new-pass
 EOF
 }
+
+@test "Able to rotate password with set-password" {
+    echo pass > "$TMPDIR/test-noop"
+
+    cat <<EOF > "$TMPDIR/pass-rotate.ini"
+[pass-rotate]
+get-password=cat "$TMPDIR/test-\$ACCOUNT"
+set-password=tee "$TMPDIR/test-\$ACCOUNT"
+gen-password=echo "new-pass"
+[noop]
+username=pg
+cassette=$TMPDIR/cassette
+EOF
+
+    run $BATS_TEST_DIRNAME/../pass-rotate noop
+    assert_success
+    assert_line 'Rotating noop... OK'
+
+    run cat "$TMPDIR/test-noop"
+    assert_output 'new-pass'
+
+    run cat "$TMPDIR/cassette"
+    assert_output <<'EOF'
+prepare pg: pass
+execute pg: pass new-pass
+EOF
+}
